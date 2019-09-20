@@ -19,22 +19,26 @@ class ClientChannel(Channel):
 		print(str(data))
 		BOAT_DATA.message = str(data)
 		
+		#if the action is an attribute of BOAT_DATA then set the value of that attribute to the value in data
 		if hasattr(BOAT_DATA, data['action']):
 			setattr(BOAT_DATA, data['action'], data['value'])
 
-
+		#refreshes the screen with new boat data
 		if DATA_REFRESH:
 			DATA_REFRESH()
 
 class MyServer(Server):
-	
+	"""
+	The GUI is setup to act as a server, the client is the boat
+	"""	
 	channelClass = ClientChannel
 	#Set channelClass to the channel class created above.
 
 
 	def __init__(self, *args, **kwargs):
 		Server.__init__(self, *args, **kwargs)
-		self.channels = []
+		self.channels = [] # clients (boats) connected to the server
+		# the channels is an array due to potential disconnects and reconects of the boat, this will store them all
 		
 	def Connected(self, channel, addr):
 		print(channel, "Connected")
@@ -46,14 +50,18 @@ class MyServer(Server):
 
 	def send_once(self, data, index = 0):
 		self.channels[-1].Send(data)
+		#sends data to most recently connected client (last element in the array)
 
 def server_update():
-	global RUN_THREAD
-	while RUN_THREAD:
-		SERVER.Pump()
-		sleep(.1)
+	global RUN_THREAD #global boolean var to stop the tread from anywhere
+	while RUN_THREAD: # repeatedly pumps the server
+		SERVER.Pump() # removing Network data from buffer and running the Network function of ClientChannel object
+		sleep(.1) # saves resources by waiting a fraction of a second between pumps
 		
 class boat_data:
+	"""
+	Stores all of the boat information in one object
+	"""
 	def __init__(self):
 		self.gps = None
 		self.rudder_pos = None
@@ -65,6 +73,9 @@ class boat_data:
 		self.message = None
 
 class mainWindow(QMainWindow):
+	"""
+	Main window od the GUI, only has one child widget (tab widget)
+	"""
 	def __init__(self):
 		super(mainWindow, self).__init__ ()
 		self.setWindowTitle('Sailbot')
@@ -77,17 +88,19 @@ class mainWindow(QMainWindow):
 
 class tabWidget(QWidget):
 	def __init__(self, parent):
-		super(QWidget, self).__init__(parent)
-		self.layout = QVBoxLayout(self)
+		super(QWidget, self).__init__(parent) # calls QWidget.init (parent class of tabWidget)
+		self.layout = QVBoxLayout(self) #lines items up vertically, not relevent as theres only one item (tabWidget)
 		self.setFont(QtGui.QFont('SansSerif', 13)) 
 
 		# Initialize tab screen
 		self.tabs = QTabWidget()
 
+		# init tabs
 		self.tab1()
 		self.tab2()
 		self.tab3()
 
+		#used for animation of wind
 		self.paint_counter = 0
 		
 
@@ -100,8 +113,6 @@ class tabWidget(QWidget):
 		self.tabs.addTab(self.tab1,"Boat Info")
 
 		self.tab1.layout = QGridLayout(self)
-		#self.pushButton1 = QPushButton("PyQt5 button")
-		#self.tab1.layout.addWidget(self.pushButton1)
 
 		self.gps_lbl = QLabel()
 		self.rudder_pos_lbl = QLabel()
@@ -110,18 +121,19 @@ class tabWidget(QWidget):
 		self.wind_speed_lbl = QLabel()
 		self.wind_dir_lbl = QLabel()
 
-		self.img = QtGui.QPixmap(300, 300)
-		self.img_lbl = QLabel()
+		#img and img_lbl is for the picture of the boat and wind
+		self.img = QtGui.QPixmap(300, 300) # drawing surface
+		self.img_lbl = QLabel() # label to hold the drawing surface
 		self.img_lbl.setPixmap(self.img)
 		#self.img_lbl.setFixedSize(400, 300)
 
-		self.message_box = QTextEdit()
+		self.message_box = QTextEdit() # stores all recived data
 
 		self.message_box .setReadOnly(True)
 		self.message_box .setLineWrapMode(QTextEdit.NoWrap)
 		self.message_box.setEnabled(False)
 
-		self.console = QLineEdit()
+		self.console = QLineEdit() # entry box for sending messages to boat
 		self.console.editingFinished.connect(lambda : self.commit_message(self.console))
 
 		global DATA_REFRESH
@@ -151,8 +163,10 @@ class tabWidget(QWidget):
 		self.buttons = []
 
 		btnNames = ['1', '2', '3', '4', '5']
+		# generates buttons with names from btnNames array
 		for i in range(5):
 			newBtn = QPushButton('Mode ' + str(i+1) + ": " + btnNames[i])
+			#buttons send command: setMode [button number] to clients
 			newBtn.clicked.connect(lambda:SERVER.send_data({"action": 'setMode', 'value' : (i+1)}))
 			self.tab2.layout.addWidget(newBtn)
 			self.buttons.append(newBtn)
@@ -162,6 +176,9 @@ class tabWidget(QWidget):
 		self.tab2.setLayout(self.tab2.layout)
 
 	def tab3(self):
+		"""
+		Incomplete, mostly just formated labels and boxes
+		"""
 
 		self.tab3 = QWidget()
 		self.tabs.addTab(self.tab3,"Manual Control")
@@ -173,6 +190,7 @@ class tabWidget(QWidget):
 		self.img_lbl2 = QLabel()
 		self.img_lbl2.setPixmap(self.img)
 
+
 		self.cam_img = QtGui.QPixmap(300, 300)
 		self.cam_lbl = QLabel()
 		self.cam_lbl.setPixmap(self.cam_img)
@@ -180,16 +198,10 @@ class tabWidget(QWidget):
 		self.toggleBtn = QPushButton('Toggle Manual Control : Disabled')
 		self.toggleBtn.clicked.connect(self.toggleManual)
 
-		#self.R_pos_lbl = QLabel("Rudder Position:")
-		#self.S_pos_lbl = QLabel("Sail Position:")
-
 		self.tooltip = QLabel("A, D to adjust Sail Position. L_Arrow, R_Arrow to adjust Rudder Position")
 
 		self.tab3.layout.addWidget(self.img_lbl2, 0, 1, 1, 1)
 		self.tab3.layout.addWidget(self.cam_lbl, 0, 0, 1, 1)
-
-		#self.tab3.layout.addWidget(self.R_pos_lbl, 1, 0, 1, 1)
-		#self.tab3.layout.addWidget(self.S_pos_lbl, 1, 1, 1, 1)
 
 		self.tab3.layout.addWidget(self.tooltip, 2, 0, 1, 2)
 
@@ -199,12 +211,20 @@ class tabWidget(QWidget):
 
 
 	def commit_message(self, textBox):
+		"""
+		called whenever a enter is pressed when console widget is targeted
+		retrives data from textbox and sends a message to clients
+		message must be formated as such [action] [value] ; ex) "test 123"
+		message can also be a one word command for the GUI, 
+		if the message is one word and not a keyword then it is ignored
+		"""
 		text = textBox.text()
 		arry = text.split(' ')
 		if len(arry) > 1:
 			data = {"action": arry[0], 'value' : str(arry[1])}
 			SERVER.send_once(data)
 
+		#one word keywords for local commands
 		else:
 			if text == 'terminate':
 				crash_app()
@@ -212,6 +232,7 @@ class tabWidget(QWidget):
 		textBox.setText('')
 
 	def paintEvent(self, event):
+		#called every frame, draws images used for data visualization
 		qp = QPainter()
 		qp.begin(self.img)
 		qp.fillRect(0, 0, 300, 300, QColor("#000000"))  
@@ -226,9 +247,8 @@ class tabWidget(QWidget):
 
 		center = 150
 
-		L = 45
-		spacer = 30
-		#self.angle += .1
+		L = 45 #length of line
+		spacer = 30 # angle between arms of boat hulls in degrees
 		
 		angle = float(BOAT_DATA.boat_orient) if BOAT_DATA.boat_orient else 0
 
@@ -258,7 +278,7 @@ class tabWidget(QWidget):
 
 	def draw_wind(self, event, qp):
 		qp.setPen(QPen(QColor(0, 0, 255), 2))
-		max_L = 425
+		max_L = 425 # length of lines for wind
 		self.paint_counter += .05
 		if self.paint_counter > 150:
 			self.paint_counter = -150
@@ -285,6 +305,9 @@ class tabWidget(QWidget):
 		
 
 	def data_refresh(self):
+		"""
+		refreshes lbels with new data from BOAT_DATA object
+		"""
 		self.gps_lbl.setText("GPS: " + str(BOAT_DATA.gps))
 		self.rudder_pos_lbl.setText("Rudder Position: " + str(BOAT_DATA.rudder_pos))
 		self.sail_pos_lbl.setText("Sail Position: " + str(BOAT_DATA.sail_pos))
@@ -307,25 +330,30 @@ class tabWidget(QWidget):
 
 	@pyqtSlot()
 	def on_click(self):
+		#dont worry about this
 		print("\n")
 		for currentQTableWidgetItem in self.tableWidget.selectedItems():
 			print(currentQTableWidgetItem.row(), currentQTableWidgetItem.column(), currentQTableWidgetItem.text())
 
 
 def crash_app():
+	#does as it says, causes the app to crash,
+	#this is important because if you just close the window the app keeps running in the console
+	#to truly close it you have to press control-break or similar in the console
+	#and the break key is like wayyy at the top of the keayboard and hard to press
 	end_program()
 
 
 if __name__ == "__main__":
 
 	
-	SERVER = MyServer(localaddr=('0.0.0.0', 1337))
+	SERVER = MyServer(localaddr=('0.0.0.0', 1337)) # creates a server object accepting connections from any IP on port 1337
 	DATA_REFRESH = None
-	BOAT_DATA = boat_data()
+	BOAT_DATA = boat_data() # creates BOAT_DATA object and sets it as a global variable
 
 	global RUN_THREAD
 	RUN_THREAD = True
-	pump_thread = Thread(target=server_update)
+	pump_thread = Thread(target=server_update)# creates a Thread running an infinite loop pumping server
 	pump_thread.start()
 	
 
