@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import pyqtSlot, QTimer, Qt
 import PyQt5.QtGui as QtGui
 from PyQt5.QtGui import QPainter, QColor, QPen
+import keyboard
 
 import PodSixNet
 from PodSixNet.Connection import connection, ConnectionListener
@@ -11,7 +12,10 @@ from PodSixNet.Server import Server
 
 from threading import Thread
 from time import sleep
+
 import math
+
+import serial
 
 class ClientChannel(Channel):
 
@@ -19,8 +23,11 @@ class ClientChannel(Channel):
 		print(str(data))
 		BOAT_DATA.message = str(data)
 		
+		if data['action'] == 'quit':
+			close_app()
+
 		#if the action is an attribute of BOAT_DATA then set the value of that attribute to the value in data
-		if hasattr(BOAT_DATA, data['action']):
+		elif hasattr(BOAT_DATA, data['action']):
 			setattr(BOAT_DATA, data['action'], data['value'])
 
 		#refreshes the screen with new boat data
@@ -45,17 +52,36 @@ class MyServer(Server):
 		self.channels.append(channel)
 
 	def send_data(self, data):
+		if ARDUINO:
+			ARDUINO.send(data)
 		for client in self.channels:
 			client.Send(data)
 
 	def send_once(self, data, index = 0):
-		self.channels[-1].Send(data)
+		if ARDUINO:
+			ARDUINO.send(data)
+		if len(self.channels) > 0:
+			self.channels[-1].Send(data)
 		#sends data to most recently connected client (last element in the array)
 
 def server_update():
-	global RUN_THREAD #global boolean var to stop the tread from anywhere
+	global RUN_THREAD, DATA_REFRESH, BOAT_DATA, ARDUINO #global boolean var to stop the tread from anywhere
 	while RUN_THREAD: # repeatedly pumps the server
-		SERVER.Pump() # removing Network data from buffer and running the Network function of ClientChannel object
+
+		if CHECK_INPUT:
+			handle_input()
+
+		if ARDUINO:
+			message = str(ARDUINO.read())[2:-5]
+
+			if message:
+				BOAT_DATA.message = message
+				if DATA_REFRESH:
+					DATA_REFRESH()
+
+		if SERVER:
+			SERVER.Pump() # removing Network data from buffer and running the Network function of ClientChannel object
+
 		sleep(.1) # saves resources by waiting a fraction of a second between pumps
 		
 class boat_data:
@@ -131,7 +157,7 @@ class tabWidget(QWidget):
 
 		self.message_box .setReadOnly(True)
 		self.message_box .setLineWrapMode(QTextEdit.NoWrap)
-		self.message_box.setEnabled(False)
+		#self.message_box.setEnabled(False)
 
 		self.console = QLineEdit() # entry box for sending messages to boat
 		self.console.editingFinished.connect(lambda : self.commit_message(self.console))
@@ -219,15 +245,29 @@ class tabWidget(QWidget):
 		if the message is one word and not a keyword then it is ignored
 		"""
 		text = textBox.text()
+		if ARDUINO:
+			ARDUINO.send(text)
 		arry = text.split(' ')
-		if len(arry) > 1:
+		if len(arry) > 1 and SERVER:
 			data = {"action": arry[0], 'value' : str(arry[1])}
 			SERVER.send_once(data)
 
 		#one word keywords for local commands
 		else:
 			if text == 'terminate':
-				crash_app()
+				close_app()
+
+			elif text.startswith('ARDU_'):
+
+				text = text.split('_')
+
+				if text[1] == "INIT":
+					#try:
+					make_arduino(str(text[2]))
+					# except TypeError:
+					# 	print("ARDU_INIT requires a COM port index")
+					# except:
+					# 	print("unable to create ARDUINO object")
 
 		textBox.setText('')
 
@@ -335,30 +375,81 @@ class tabWidget(QWidget):
 		for currentQTableWidgetItem in self.tableWidget.selectedItems():
 			print(currentQTableWidgetItem.row(), currentQTableWidgetItem.column(), currentQTableWidgetItem.text())
 
+#     /\           | |     (_)              / ____|                   
+#    /  \   _ __ __| |_   _ _ _ __   ___   | |     ___  _ __ ___  ___ 
+#   / /\ \ | '__/ _` | | | | | '_ \ / _ \  | |    / _ \| '_ ` _ \/ __|
+#  / ____ \| | | (_| | |_| | | | | | (_) | | |___| (_) | | | | | \__ \
+# /_/    \_\_|  \__,_|\__,_|_|_| |_|\___/   \_____\___/|_| |_| |_|___/
+                                                                
+class arduino:
 
-def crash_app():
-	#does as it says, causes the app to crash,
+	def __init__(self, port_num):
+		self.ser1 = serial.Serial('COM'+port_num, 9600) 
+
+
+	def send(self, data):
+		self.ser1.write(str(data).encode())
+
+	def read(self):
+		message = self.ser1.readline()
+		print(message)
+		return message
+
+
+
+def close_app():
+	app.quit()
+	sys.exit()
+
+	#attempts to close app, if  causes the app to crash,
 	#this is important because if you just close the window the app keeps running in the console
 	#to truly close it you have to press control-break or similar in the console
 	#and the break key is like wayyy at the top of the keayboard and hard to press
 	end_program()
 
+def handle_input():
+	if keyboard.is_pressed('a') and SERVER:
+		val = min((BOAT_DATA.sail_pos + 5), 90) if BOAT_DATA.sail_pos else 5
+		SERVER.send_data({'action' : 'sail_pos', 'value' : val})
+		
 
-if __name__ == "__main__":
+	elif keyboard.is_pressed('d') and SERVER:
+		val = max((BOAT_DATA.sail_pos - 5), -90) if BOAT_DATA.sail_pos else -5
+		SERVER.send_data({'action' : 'sail_pos', 'value' : val})
 
-	
-	SERVER = MyServer(localaddr=('0.0.0.0', 1337)) # creates a server object accepting connections from any IP on port 1337
-	DATA_REFRESH = None
-	BOAT_DATA = boat_data() # creates BOAT_DATA object and sets it as a global variable
+def make_arduino(com_port):
 
-	global RUN_THREAD
+	global RUN_THREAD, ARDUINO
+
+	ARDUINO = arduino(com_port)
+
 	RUN_THREAD = True
 	pump_thread = Thread(target=server_update)# creates a Thread running an infinite loop pumping server
 	pump_thread.start()
+
+
+if __name__ == "__main__":
 	
+	try:
+		make_arduino(sys.argv.pop())
+	except:
+		ARDUINO = None
+		print("Could not create ARDUINO object, did you include a COM port is args?")
+		print("use the following command to add ARDUINO: ARDU_INIT_[COM port]")
+
+	handle_input()
+	CHECK_INPUT = True
+
+	SERVER = MyServer(localaddr=('0.0.0.0', 1338)) # creates a server object accepting connections from any IP on port 1337
+	DATA_REFRESH = None
+	BOAT_DATA = boat_data() # creates BOAT_DATA object and sets it as a global variable
+
+	
+
 
 	app = QApplication(sys.argv)
 	w = mainWindow()
 
 	sys.exit(app.exec_())
+
 
